@@ -5,6 +5,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 from utils.stat import write_to_file
 
+'''
+This code is not working. Editing in progress.
+'''
 class AgentA2C:
     def __init__(self, gamma, actions_count, model, lr = 0.0001, beta_entropy = 0.001, value_loss_coef = 0.5, id=1, name='a2c'):
         self.gamma = gamma

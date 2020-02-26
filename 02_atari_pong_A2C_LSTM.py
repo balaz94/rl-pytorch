@@ -9,6 +9,10 @@ from agents.a2c_lstm import AgentA2C, Worker
 from utils.init import weights_init_xavier
 from utils.pong_wrapper import make_env
 
+'''
+This code is not working. Editing in progress.
+'''
+
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()

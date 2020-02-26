@@ -13,40 +13,34 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
 
-        self.conv1 = nn.Conv2d(num_inputs, 32, 3, stride=2, padding=1)
-        self.conv2 = nn.Conv2d(32, 32, 3, stride=2, padding=1)
-        self.conv3 = nn.Conv2d(32, 32, 3, stride=2, padding=1)
-        self.conv4 = nn.Conv2d(32, 32, 3, stride=2, padding=1)
+        self.conv1 = nn.Conv2d(4, 32, 3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(32, 32, 3, stride=1, padding=1)
+        self.conv3 = nn.Conv2d(32, 64, 3, stride=1, padding=1)
+        self.conv4 = nn.Conv2d(64, 64, 3, stride=1, padding=1)
 
-        self.lstm = nn.LSTMCell(32 * 3 * 3, 256)
-
-        self.fc1 = nn.Linear(256, 4)
-        self.fc2 = nn.Linear(256, 1)
+        self.fc1 = nn.Linear(5 * 5 * 64, 512)
+        self.fc2 = nn.Linear(512, 4)
+        self.fc3 = nn.Linear(5 * 5 * 64, 512)
+        self.fc4 = nn.Linear(512, 1)
 
         self.apply(weights_init_xavier)
 
-    def forward(self, inputs):
-        inputs, (hx, cx) = inputs
-        x = F.elu(self.conv1(inputs))
-        x = F.elu(self.conv2(x))
-        x = F.elu(self.conv3(x))
-        x = F.elu(self.conv4(x))
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.max_pool2d(x, kernel_size=2, stride=2, padding=0)
+        x = F.relu(self.conv2(x))
+        x = F.max_pool2d(x, kernel_size=2, stride=2, padding=0)
+        x = F.relu(self.conv3(x))
+        x = F.max_pool2d(x, kernel_size=2, stride=2, padding=0)
+        x = F.relu(self.conv4(x))
+        x = F.max_pool2d(x, kernel_size=2, stride=2, padding=0)
+        x = x.view(-1, 5 * 5 * 64)
 
-        x = x.view(-1, 32 * 3 * 3)
-
-        hx, cx = self.lstm(x, (hx, cx))
-        x = hx
-
-        logit = self.fc1(x)
-        value = self.fc2(x)
-        return logit, value, (hx, cx)
-
-    def num_flat_features(self, x):
-        size = x.size()[1:]
-        num_features = 1
-        for s in size:
-            num_features *= s
-        return num_features
+        x_logit = F.relu(self.fc1(x))
+        logit = self.fc2(x_logit)
+        x_value = F.relu(self.fc3(x))
+        value = self.fc4(x_value)
+        return logit, value
 
 
 def learning(num):
