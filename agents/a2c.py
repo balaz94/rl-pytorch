@@ -42,6 +42,7 @@ class AgentA2C:
         observations = torch.stack(observations).to(self.device)
 
         self.average_score = []
+        best_avg = -100
         self.episodes = 0
 
         text = text = 'iteration,episode,score,step'
@@ -106,23 +107,24 @@ class AgentA2C:
             loss.backward()
             self.optimizer.step()
 
+            avg = np.average(self.average_score[-100:])
+            if avg > best_avg:
+                best_avg = avg
+                print('saving model, best score is ', best_avg)
+                torch.save(self.model.state_dict(), 'models/' + self.name + '_' + str(self.id) + '_a2c.pt')
+
             if iteration % 25 == 0 and iteration > 0:
-                avg = np.average(self.average_score[-100:])
                 print(iteration, '\tepisodes: ', self.episodes, '\taverage score: ', avg)
                 if write:
                     text += '\n' + str(iteration) + ',' + str(self.episodes) + ',' + str(avg) + ',' + str(iter_step * iteration)
 
                     if iteration % 10000 == 0:
+                        self.average_score = self.average_score[-100:]
                         write_to_file(text, 'logs/' + self.name + '_' + str(self.id) + '_' + str(iteration) + '_a2c.txt')
                         torch.save(self.model.state_dict(), 'models/' + self.name + '_' + str(self.id) + '_' + str(iteration) + '_a2c.pt')
 
-        if write:
-            write_to_file(text, 'logs/' + self.name + '_' + str(self.id) + '_' + str(iteration) + '_a2c.txt')
-        torch.save(self.model.state_dict(), 'models/' + self.name + '_' + str(self.id) + '_' + str(iteration) + '_a2c.pt')
-
     def load_model(self):
-        self.model.load_state_dict(torch.load('models/' + self.name + '_' + str(self.id) + '_a2c.pt'))
-        self.model.eval()
+        self.model.load_state_dict(torch.load('models/' + self.name))
 
     def save_model(self):
         torch.save(self.model.state_dict(), 'models/' + self.name + '_' + str(self.id) + '_a2c.pt')

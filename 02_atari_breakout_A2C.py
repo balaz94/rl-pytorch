@@ -42,26 +42,35 @@ class Net(nn.Module):
         value = self.fc4(x_value)
         return logit, value
 
+def reward_function(r):
+    r = r / 10.0
 
-def learning(num):
+    if r < -1.0:
+        r = -1.0
+
+    if r > 1.0:
+        r = 1.0
+    return r
+
+
+def learning(num = 1):
     actions = 4
 
     agent = AgentA2C(0.99, actions, Net(), 0.001, beta_entropy = 0.001, id=num, name='breakout/breakout')
-    agent.load_model()
 
     workers = []
     for id in range(16):
         env = make_env('BreakoutNoFrameskip-v4')
         env.seed(id)
-        w = Worker(id, env, agent)
+        w = Worker(id, env, agent, reward_function = reward_function)
         workers.append(w)
 
-    agent.learn(workers, 16, 300001)
+    agent.learn(workers, 32, 300001)
 
-def animation(num):
+def animation():
     actions = 4
 
-    agent = AgentA2C(0.99, actions, Net(), 0.001, beta_entropy = 0.001, id=num, name='breakout/breakout')
+    agent = AgentA2C(0.99, actions, Net(), 0.001, beta_entropy = 0.001, id=0, name='breakout/breakout_2_70000_a2c.pt') #breakout/breakout_1_20000_a2c.pt'
     env = make_env('BreakoutNoFrameskip-v4')
     agent.load_model()
 
@@ -71,7 +80,7 @@ def animation(num):
 
         while not terminal:
             env.render()
-            time.sleep(0.01)
+            time.sleep(0.02)
             observation = torch.from_numpy(observation)
             action = agent.choose_action(observation)
             observation, _, terminal, _ = env.step(action)
@@ -79,4 +88,4 @@ def animation(num):
     env.close()
 
 if __name__ == '__main__':
-    learning(1)
+    animation()
