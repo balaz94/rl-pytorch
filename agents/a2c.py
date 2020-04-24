@@ -105,15 +105,15 @@ class AgentA2C:
             self.optimizer.zero_grad()
             loss = policy_loss.mean() + self.value_loss_coef * value_loss.mean()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.1)
             self.optimizer.step()
 
-            avg = np.average(self.average_score[-100:])
-            if avg > best_avg:
-                best_avg = avg
-                print('saving model, best score is ', best_avg)
-                torch.save(self.model.state_dict(), 'models/' + self.name + '_' + str(self.id) + '_a2c.pt')
-
             if iteration % 25 == 0 and iteration > 0:
+                avg = np.average(self.average_score[-100:])
+                if avg > best_avg:
+                    best_avg = avg
+                    print('saving model, best score is ', best_avg)
+                    torch.save(self.model.state_dict(), 'models/' + self.name + '_' + str(self.id) + '_a2c.pt')
                 print(iteration, '\tepisodes: ', self.episodes, '\taverage score: ', avg)
                 if write:
                     text += '\n' + str(iteration) + ',' + str(self.episodes) + ',' + str(avg) + ',' + str(iter_step * iteration)

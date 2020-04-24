@@ -59,18 +59,18 @@ def learning(num = 1):
     agent = AgentA2C(0.99, actions, Net(), 0.001, beta_entropy = 0.001, id=num, name='breakout/breakout')
 
     workers = []
-    for id in range(16):
+    for id in range(8):
         env = make_env('BreakoutNoFrameskip-v4')
         env.seed(id)
         w = Worker(id, env, agent, reward_function = reward_function)
         workers.append(w)
 
-    agent.learn(workers, 32, 300001)
+    agent.learn(workers, 100, 100001)
 
 def animation():
     actions = 4
 
-    agent = AgentA2C(0.99, actions, Net(), 0.001, beta_entropy = 0.001, id=0, name='breakout/breakout_2_70000_a2c.pt') #breakout/breakout_1_20000_a2c.pt'
+    agent = AgentA2C(0.99, actions, Net(), 0.001, beta_entropy = 0.001, id=0, name='breakout/breakout_1_a2c.pt') #breakout/breakout_1_20000_a2c.pt'
     env = make_env('BreakoutNoFrameskip-v4')
     agent.load_model()
 
