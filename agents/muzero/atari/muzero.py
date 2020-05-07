@@ -4,10 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from mcts import MCTS, Node
+from agents.muzero.atari.mcts import MCTS, Node
 
 class GameData:
-    def __init__(self, max_size):
+    def __init__(self):
         self.observations = []
         self.actions = []
         self.rewards = []
@@ -26,13 +26,13 @@ class GameData:
     def sample(self, history_size, agent):
         start_index = 0
         if self.size > history_size:
-            start_index = randrange(self.size - history_size)
+            start_index = randrange(self.size - history_size - 1)
         end_index = start_index + history_size
-        if self.terminal and self.size == end_index:
+        if self.terminal and self.size == end_index + 1:
             value = 0
         else:
             with torch.no_grad():
-                _, value, _ = agent.predict_from_observation(self.observations[end_index])
+                _, value, _ = agent.predict_from_observation(self.observations[end_index].unsqueeze(0).to(agent.device).float())
 
         values = torch.zeros(history_size)
         for i in reversed(range(0, end_index - start_index)):
@@ -41,9 +41,27 @@ class GameData:
 
         return self.observations[start_index], self.actions[start_index:end_index], self.rewards[start_index:end_index], values
 
+class ExperienceReplay:
+    def __init__(self, size):
+        self.size = size
+        self.data = self.data = np.zeros(size, dtype=object)
+        self.index = 0
+
+    def add(self, data):
+        self.data[self.index % self.size] = data
+        self.index += 1
+        #print(self.index)
+
+    def sample(self, batch_size):
+        length = min(self.size, self.index)
+        batch = np.random.choice(length, batch_size)
+        return self.data[batch]
+
+def reward_func(r):
+    return r
 
 class AgentMuZero:
-    def __init__(self, model, actions, replay_buffer, gamma = 0.997, simulations = 50, training = True, c1 = 19625, c2 = 1.25, state_size = (6, 6), lr = 0.001):
+    def __init__(self, model, actions, replay_buffer, gamma = 0.997, simulations = 50, training = True, c1 = 19625, c2 = 1.25, lr = 0.001):
         self.model = model
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -57,45 +75,46 @@ class AgentMuZero:
         self.gamma = gamma
         self.simulations = simulations
         self.actions = actions
-        self.state_size = state_size
-        selt.training = training
+        self.training = training
 
         self.c1 = c1
         self.c2 = c2
 
     def create_hidden_state(self, state, action):
-        tensor_actions = torch.zeros([self.actions, *state_size], dtype=torch.float64)
-        tensor_actions[action] = torch.ones([*state_size], dtype=torch.float64)
-        hidden_state = torch.cat(state, tensor_actions)
+        tensor_actions = torch.zeros([self.actions, 6, 6], dtype=torch.float32)
+        tensor_actions[action] = torch.ones([6, 6], dtype=torch.float32)
+        hidden_state = torch.cat((state, tensor_actions))
         return hidden_state
 
     def choose_action(self, observation):
         with torch.no_grad():
-            observation = observation.to(self.device).float()
+            observation = observation.unsqueeze(0).to(self.device).float()
             logits, value, state = self.predict_from_observation(observation)
-            probabilities = F.log_softmax(logits.cpu(), dim=-1)
-            root = Node(state.cpu(), probabilities, value.cpu()[0].item())
+            probabilities = F.softmax(logits.cpu(), dim=-1)
+            value = value.cpu()
+            state = state.cpu()
+            root = Node(state[0], probabilities[0], value.item())
 
-            mcts = MCTS(root, self.c1, self.c2)
+            mcts = MCTS(root, self.c1, self.c2, self.gamma)
 
             for simulation in range(self.simulations):
                 edge, edges = mcts.selection()
                 hidden_state = self.create_hidden_state(edge.node1.state, edge.action)
-                logits, value, state, reward = self.predic_from_state(hidden_state.to(self.device).float())
-                probabilities = F.log_softmax(logits.cpu(), dim=-1)
-                reward, value = reward.cpu(), value.cpu()
-                mcts.expansion(edge, state.cpu(), reward[0].item(), probabilities, value[0].item())
+                logits, value, state, reward = self.predic_from_state(hidden_state.unsqueeze(0).to(self.device).float())
+                probabilities = F.softmax(logits.cpu(), dim=-1)
+                state, reward, value = state.cpu(), reward.cpu(), value.cpu()
+                mcts.expansion(edge, state[0], reward.item(), probabilities[0], value.item())
                 mcts.backup(edges)
 
-            counts = np.zeros(self.actions)
+            counts = torch.zeros(self.actions)
             sum = 0.0
-            for edge in rande(mcts.root.edges):
+            for i in range(len(mcts.root.edges)):
                 counts[i] = mcts.root.edges[i].N
                 sum += mcts.root.edges[i].N
 
             if self.training:
                 probs = counts / sum
-                probs = torch.from_numpy(probs)
+                #print(probs, root.V, root.P)
                 action = probs.multinomial(num_samples=1).detach()
                 return action[0].item()
             else:
@@ -111,7 +130,7 @@ class AgentMuZero:
         logits, value = self.model.prediction(new_state)
         return logits, value, new_state, reward
 
-    def play(self, env, episodes = 1000, memory_sequence_size = 50 , batch_size = 256, learn_step = 25, print_episode = 25, history_size = 5):
+    def play(self, env, episodes = 10000, memory_sequence_size = 50 , batch_size = 16, learn_step = 10, print_episode = 1, history_size = 5, reward_function = reward_func):
         scores = []
 
         for episode in range(episodes):
@@ -120,20 +139,22 @@ class AgentMuZero:
 
             step = 0
             score = 0
-            observation = env.reset()
+            observation = torch.from_numpy(env.reset())
             terminal = False
 
             while not terminal:
                 action = self.choose_action(observation)
-                new_observation, reward, terminal = env.step(action)
+                new_observation, reward, terminal, _ = env.step(action)
+                new_observation = torch.from_numpy(new_observation)
                 score += reward
+                reward = reward_function(reward)
 
                 if game_data.size < memory_sequence_size:
                     game_data.add(observation, action, reward)
                 else:
                     game_data2.add(observation, action, reward)
-                    if game_data2.size == history_size:
-                        self.replay_buffer.add(self.replay_buffer.max_priority(), game_data)
+                    if game_data2.size == history_size * 2:
+                        self.replay_buffer.add(game_data)
                         game_data = game_data2
                         game_data2 = GameData()
 
@@ -143,86 +164,92 @@ class AgentMuZero:
                             o, a, r = game_data2.get(i)
                             game_data.add(o, a, r)
                     game_data.terminal = True
-                    self.replay_buffer.add(self.replay_buffer.max_priority(), game_data)
+                    self.replay_buffer.add(game_data)
 
                 observation = new_observation
-
                 if step % learn_step == 0:
                     self.learn(batch_size, history_size)
                 step += 1
 
             scores.append(score)
-            score = 0
 
             if episode % print_episode == 0:
-                avg = np.average(self.average_score[-100:])
+                avg = np.average(scores[-100:])
+                #for a in range(10):
+                #    print('***')
                 print('episodes: ', episode, '\taverage score: ', avg)
+                #for a in range(10):
+                #    print('***')
 
     def learn(self, batch_size, history_size):
-        if self.replay_buffer.size < batch_size:
+        if self.replay_buffer.index < batch_size:
             return
 
-        batch, indexes, is_weight = self.replay_buffer.sample(batch_size)
-        is_weight = torch.from_numpy(is_weight)
+        batch = self.replay_buffer.sample(batch_size)
         observations = []
-        actions = torch.zeros([history_size, batch_size], dtype=torch.int32)
-        rewards = torch.zeros(history_size, batch_size)
-        values = torch.zeros(history_size, batch_size)
+        actions = torch.zeros([history_size, batch_size, 1], dtype=torch.int64)
+        target_rewards = torch.zeros(history_size, batch_size)
+        target_values = torch.zeros(history_size, batch_size)
 
-        set_indexes = set()
+        ratio = 1.0 / history_size
+
         for i in range(batch_size):
-            o, a, r, v = batch.sample(history_size, self)
+            o, a, r, v = batch[i].sample(history_size, self)
             observations.append(o)
-            set_indexes.add(indexes[i])
 
             for j in range(history_size):
-                actions[j, i] = a[j]
-                rewards[j, i] = r[j]
-                values[j, i] = v[j]
+                actions[j, i, 0] = a[j]
+                target_rewards[j, i] = r[j]
+                target_values[j, i] = v[j]
 
         observations = torch.stack(observations).to(self.device)
 
-        logits, value, hidden_state = self.predict_from_observation(observations)
-        logits, values, hidden_state = logits.cpu(), values.cpu(), hidden_state.cpu()
+        logits, values, hidden_states = self.predict_from_observation(observations)
+        logits, values, hidden_states = logits.cpu(), values.cpu(), hidden_states.cpu()
         states = []
-        for state, action in zip(hidden_state, actions[0]):
-            states.append(create_hidden_state(state, action))
+        for state, action in zip(hidden_states, actions[0]):
+            states.append(self.create_hidden_state(state, action))
         states = torch.stack(states).to(self.device)
 
         log_probs = F.log_softmax(logits, dim=-1)
         log_probs_policy = log_probs.gather(1, actions[0])
 
-        advantage = value - values[0]
-        loss = (is_weight * (advantage**2 + log_probs_policy * advantage.detach())).sum()
+        advantage = target_values[0] - values
 
-        priorities = advantage.detach()
+        value_loss = (advantage**2).mean()
+        policy_loss = - (log_probs_policy * advantage.detach()).mean()
+        reward_loss = torch.zeros([1])
 
-        for index in set_indexes:
-            sum = 0.0
-            count = 0
-            for i in range(batch_size):
-                if indexes[i] == index:
-                    sum += priorities[i]
-                    count += 1
-            self.replay_buffer.update(index, sum / count)
+        #loss = (advantage**2).mean() - (log_probs_policy * advantage.detach()).mean()
 
         for i in range(1, history_size):
-            logits, value, hidden_state, reward = self.predic_from_state(states)
-            logits, values, hidden_state, reward = logits.cpu(), values.cpu(), hidden_state.cpu(), reward.cpu()
+            logits, values, hidden_states, rewards = self.predic_from_state(states)
+            logits, values, hidden_states, rewards = logits.cpu(), values.cpu(), hidden_states.cpu(), rewards.cpu()
 
             states = []
-            for state, action in zip(hidden_state, actions[i]):
-                states.append(create_hidden_state(state, action))
+            for state, action in zip(hidden_states, actions[i]):
+                hidden_state = self.scale_gradient(state, 0.5)
+                states.append(self.create_hidden_state(hidden_state, action))
             states = torch.stack(states).to(self.device)
 
             log_probs = F.log_softmax(logits, dim=-1)
             log_probs_policy = log_probs.gather(1, actions[i])
 
-            advantage = value - values[i]
-            reward_loss = reward - rewards[i-1]
-            loss += (is_weight * (advangate**2 + log_probs_policy * advantage.detach() + reward_loss**2)).sum()
+            advantage = target_values[i] - values
 
+            value_loss += (advantage**2).mean() * ratio
+            policy_loss += - (log_probs_policy * advantage.detach()).mean() * ratio
+            reward_loss += ((target_rewards[i-1] - rewards)**2).mean() * ratio
+            #l = (advantage**2).mean() - (log_probs_policy * advantage.detach()).mean() + (reward_loss**2).mean()
+            #loss += self.scale_gradient(l, ratio)
+
+        loss = value_loss + policy_loss + reward_loss
+        print('value', value_loss, 'policy', policy_loss, 'reward', reward_loss)
+        #print('loss', loss)
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.1)
+        print(self.model.show())
         self.optimizer.step()
+
+    def scale_gradient(self, tensor, scale):
+        return tensor * scale + tensor.detach() * (1 - scale)

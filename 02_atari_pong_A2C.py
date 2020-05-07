@@ -65,5 +65,5 @@ def learning(num):
     agent.learn(workers, 16, 20000)
 
 if __name__ == '__main__':
-    for i in range(5):
+    for i in range(10, 20):
         learning(i)

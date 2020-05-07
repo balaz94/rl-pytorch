@@ -133,7 +133,7 @@ def reward_func(r):
     return r
 
 class Worker:
-    def __init__(self, id, env, agent, reward_function = reward_func, print_score = False):
+    def __init__(self, id, env, agent, g, print_score = False):
         self.id = id
         self.env = env
 
