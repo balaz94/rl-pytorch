@@ -49,12 +49,12 @@ class AgentA2C:
         iter_step = max_steps * len_workers
 
         for iteration in range(start_iteration, max_iteration):
-            mem_values = []
-            mem_log_probs = []
-            mem_entropies = []
+            mem_values = torch.zeros([max_steps, len_workers, 1])
+            mem_log_probs = torch.zeros([max_steps, len_workers, 1])
+            mem_entropies = torch.zeros([max_steps, len_workers, 1])
 
-            mem_rewards = []
-            mem_non_terminals = []
+            mem_rewards = torch.zeros([max_steps, len_workers, 1])
+            mem_non_terminals = torch.ones([max_steps, len_workers, 1])
 
             for step in range(max_steps):
                 logits, values = self.model(observations)
@@ -67,9 +67,9 @@ class AgentA2C:
                 actions = probs.multinomial(num_samples=1).detach()
                 log_probs_policy = log_probs.gather(1, actions)
 
-                mem_values.append(values)
-                mem_entropies.append(entropies)
-                mem_log_probs.append(log_probs_policy)
+                mem_values[step] = values
+                mem_entropies[step] = entropies
+                mem_log_probs[step] = log_probs_policy
 
                 rewards = torch.zeros([len_workers, 1])
                 non_terminals = torch.ones([len_workers, 1], dtype=torch.int8)
@@ -83,27 +83,28 @@ class AgentA2C:
                     observations.append(torch.from_numpy(o).float())
                 observations = torch.stack(observations).to(self.device)
 
-                mem_rewards.append(rewards)
-                mem_non_terminals.append(non_terminals)
+                mem_rewards[step] = rewards
+                mem_non_terminals[step] = non_terminals
 
             with torch.no_grad():
                 _, R = self.model(observations)
                 R = R.detach().cpu()
 
-            value_loss = torch.zeros([len_workers, 1])
-            policy_loss = torch.zeros([len_workers, 1])
+            advantages = torch.zeros([max_steps, len_workers, 1])
 
             for step in reversed(range(max_steps)):
                 R = mem_rewards[step] + self.gamma * R * mem_non_terminals[step]
-                advantage = R - mem_values[step]
-                value_loss += advantage**2
-                policy_loss += - mem_log_probs[step] * advantage.detach() + self.beta_entropy * mem_entropies[step]
+                advantages[step] = R - mem_values[step]
 
-            policy_loss = policy_loss / max_steps
-            value_loss = value_loss / max_steps
+            advantages_detach = advantages.detach()
+            #advantages_detach = (advantages_detach - torch.mean(advantages_detach)) / (torch.std(advantages_detach) + 1e-9)
+
+            value_loss = (advantages**2).mean()
+            policy_loss = - (mem_log_probs * advantages_detach).mean()
+            entropy_loss = mem_entropies.mean()
 
             self.optimizer.zero_grad()
-            loss = policy_loss.mean() + self.value_loss_coef * value_loss.mean()
+            loss = policy_loss + self.value_loss_coef * value_loss + self.beta_entropy * entropy_loss
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.1)
             self.optimizer.step()
@@ -130,10 +131,14 @@ class AgentA2C:
         torch.save(self.model.state_dict(), 'models/' + self.name + '_' + str(self.id) + '_a2c.pt')
 
 def reward_func(r):
+    if r > 1:
+        return 1
+    elif r < -1:
+        return -1
     return r
 
 class Worker:
-    def __init__(self, id, env, agent, g, print_score = False):
+    def __init__(self, id, env, agent, print_score = False, reward_function = reward_func):
         self.id = id
         self.env = env
 

@@ -4,7 +4,10 @@ import matplotlib.dates as mdates
 
 data = []
 colors = ['blue', 'red', 'green', 'black', 'pink', 'brown', 'yellow', 'indianred', 'fuchsia', 'orange', 'royalblue', 'aqua', 'grey', 'chartreuse']
-names = ['breakout/breakout_2_70000_a2c.txt', 'breakout/breakout_1_70000_ppo.txt', 'breakout/breakout_1_70000_a2c.txt']
+names = ['pong/pong256_1_700_ppo.txt', 'pong/pong512_1_700_ppo.txt', 'pong/pong768_1_700_ppo.txt', 'pong/pong1024_1_700_ppo.txt', 'pong/pong256_2_1_700_ppo.txt',
+         'pong/pong256_2_700_ppo.txt', 'pong/pong512_2_700_ppo.txt', 'pong/pong768_2_700_ppo.txt', 'pong/pong1024_2_700_ppo.txt', 'pong/pong256_2_2_700_ppo.txt']
+
+names2 = ['pong/pong256_2_700_ppo.txt', 'pong/pong512_2_700_ppo.txt', 'pong/pong768_2_700_ppo.txt', 'pong/pong1024_2_700_ppo.txt', 'pong/pong256_2_2_700_ppo.txt']
 
 
 for i in range(len(names)):

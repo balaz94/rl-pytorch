@@ -61,7 +61,7 @@ def reward_func(r):
     return r
 
 class AgentMuZero:
-    def __init__(self, model, actions, replay_buffer, gamma = 0.997, simulations = 50, training = True, c1 = 19625, c2 = 1.25, lr = 0.001):
+    def __init__(self, model, actions, replay_buffer, gamma = 0.997, simulations = 50, training = True, c1 = 19625, c2 = 1.25, lr = 0.0005):
         self.model = model
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -114,7 +114,7 @@ class AgentMuZero:
 
             if self.training:
                 probs = counts / sum
-                #print(probs, root.V, root.P)
+                print(probs, root.V, root.P)
                 action = probs.multinomial(num_samples=1).detach()
                 return action[0].item()
             else:
@@ -130,7 +130,7 @@ class AgentMuZero:
         logits, value = self.model.prediction(new_state)
         return logits, value, new_state, reward
 
-    def play(self, env, episodes = 10000, memory_sequence_size = 50 , batch_size = 16, learn_step = 10, print_episode = 1, history_size = 5, reward_function = reward_func):
+    def play(self, env, episodes = 10000, memory_sequence_size = 50 , batch_size = 128, learn_step = 10, print_episode = 1, history_size = 5, reward_function = reward_func):
         scores = []
 
         for episode in range(episodes):
@@ -145,6 +145,7 @@ class AgentMuZero:
             while not terminal:
                 action = self.choose_action(observation)
                 new_observation, reward, terminal, _ = env.step(action)
+                #print(new_observation[0])
                 new_observation = torch.from_numpy(new_observation)
                 score += reward
                 reward = reward_function(reward)
@@ -237,9 +238,9 @@ class AgentMuZero:
 
             advantage = target_values[i] - values
 
-            value_loss += (advantage**2).mean() * ratio
-            policy_loss += - (log_probs_policy * advantage.detach()).mean() * ratio
-            reward_loss += ((target_rewards[i-1] - rewards)**2).mean() * ratio
+            value_loss += self.scale_gradient((advantage**2).mean(), ratio)
+            policy_loss += self.scale_gradient((- log_probs_policy * advantage.detach()).mean(), ratio)
+            reward_loss += self.scale_gradient(((target_rewards[i-1] - rewards)**2).mean(), ratio)
             #l = (advantage**2).mean() - (log_probs_policy * advantage.detach()).mean() + (reward_loss**2).mean()
             #loss += self.scale_gradient(l, ratio)
 
@@ -248,7 +249,7 @@ class AgentMuZero:
         #print('loss', loss)
         self.optimizer.zero_grad()
         loss.backward()
-        print(self.model.show())
+        #print(self.model.show())
         self.optimizer.step()
 
     def scale_gradient(self, tensor, scale):
